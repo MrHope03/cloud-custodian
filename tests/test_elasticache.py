@@ -793,3 +793,119 @@ class TestReservedCacheNodes(BaseTest):
         resources = p.run()
         self.assertEqual(len(resources), 1)
         self.assertEqual(resources[0]['State'], 'active')
+
+
+class TestElastiCacheServerless(BaseTest):
+
+    def test_elasticache_serverless_simple(self):
+        """Test listing serverless caches"""
+        session_factory = self.replay_flight_data("test_elasticache_serverless_simple")
+        p = self.load_policy(
+            {
+                "name": "elasticache-serverless-list",
+                "resource": "cache-serverless",
+            },
+            session_factory=session_factory,
+        )
+        resources = p.run()
+        self.assertEqual(len(resources), 2)
+        self.assertIn("ServerlessCacheName", resources[0])
+        self.assertIn("Engine", resources[0])
+
+    def test_elasticache_serverless_filter_by_engine(self):
+        """Test filtering serverless caches by engine type"""
+        session_factory = self.replay_flight_data("test_elasticache_serverless_simple")
+        p = self.load_policy(
+            {
+                "name": "elasticache-serverless-redis",
+                "resource": "cache-serverless",
+                "filters": [
+                    {"type": "value", "key": "Engine", "value": "redis"}
+                ],
+            },
+            session_factory=session_factory,
+        )
+        resources = p.run()
+        self.assertTrue(all(r["Engine"] == "redis" for r in resources))
+
+    def test_elasticache_serverless_filter_by_status(self):
+        """Test filtering serverless caches by status"""
+        session_factory = self.replay_flight_data("test_elasticache_serverless_simple")
+        p = self.load_policy(
+            {
+                "name": "elasticache-serverless-available",
+                "resource": "cache-serverless",
+                "filters": [
+                    {"type": "value", "key": "Status", "value": "available"}
+                ],
+            },
+            session_factory=session_factory,
+        )
+        resources = p.run()
+        self.assertTrue(all(r.get("Status") == "available" for r in resources))
+
+    def test_elasticache_serverless_delete(self):
+        """Test deleting serverless caches"""
+        session_factory = self.replay_flight_data("test_elasticache_serverless_delete")
+        log_output = self.capture_logging('custodian.actions')
+        p = self.load_policy(
+            {
+                "name": "elasticache-serverless-delete",
+                "resource": "cache-serverless",
+                "filters": [
+                    {"type": "value", "key": "Engine", "value": "memcached"}
+                ],
+                "actions": [{"type": "delete"}],
+            },
+            session_factory=session_factory,
+        )
+        resources = p.run()
+        self.assertEqual(len(resources), 1)
+        self.assertIn("Deleted ElastiCache serverless cache", log_output.getvalue())
+
+    def test_elasticache_serverless_modify(self):
+        """Test modifying serverless cache attributes"""
+        session_factory = self.replay_flight_data("test_elasticache_serverless_modify")
+        p = self.load_policy(
+            {
+                "name": "elasticache-serverless-modify",
+                "resource": "cache-serverless",
+                "actions": [
+                    {
+                        "type": "modify",
+                        "attributes": {
+                            "SecurityGroupIds": ["sg-12345678", "sg-87654321"]
+                        }
+                    }
+                ],
+            },
+            session_factory=session_factory,
+        )
+        resources = p.run()
+        self.assertTrue(len(resources) > 0)
+
+    def test_elasticache_serverless_tag(self):
+        """Test tagging serverless caches"""
+        session_factory = self.replay_flight_data("test_elasticache_serverless_tag")
+        client = session_factory().client("elasticache")
+        p = self.load_policy(
+            {
+                "name": "elasticache-serverless-tag",
+                "resource": "cache-serverless",
+                "filters": [
+                    {"type": "value", "key": "Engine", "value": "redis"}
+                ],
+                "actions": [
+                    {"type": "tag", "key": "Environment", "value": "production"}
+                ],
+            },
+            session_factory=session_factory,
+        )
+        resources = p.run()
+        self.assertEqual(len(resources), 1)
+        # Verify tag was applied
+        arn = p.resource_manager.generate_arn(resources[0]["ServerlessCacheName"])
+        tags = client.list_tags_for_resource(ResourceName=arn)["TagList"]
+        tag_map = {t["Key"]: t["Value"] for t in tags}
+        self.assertIn("Environment", tag_map)
+        self.assertEqual(tag_map["Environment"], "production")

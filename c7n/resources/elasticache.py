@@ -98,6 +98,49 @@ class ElastiCacheCluster(QueryResourceManager):
     }
 
 
+@resources.register('cache-serverless')
+class ElastiCacheServerless(QueryResourceManager):
+    """Serverless ElastiCache resource - Redis and Memcached serverless options
+
+    :example:
+
+    .. code-block:: yaml
+
+        policies:
+          - name: cache-serverless-list
+            resource: aws.cache-serverless
+            filters:
+              - type: value
+                key: Engine
+                value: redis
+    """
+
+    class resource_type(TypeInfo):
+        service = 'elasticache'
+        arn_type = 'serverlesscache'
+        arn_separator = ":"
+        enum_spec = ('describe_serverless_caches',
+                     'ServerlessCaches[]', None)
+        name = id = 'ServerlessCacheName'
+        filter_name = 'ServerlessCacheName'
+        filter_type = 'scalar'
+        date = 'CreateTime'
+        dimension = 'ServerlessCacheName'
+        universal_taggable = True
+        cfn_type = 'AWS::ElastiCache::ServerlessCache'
+        permissions_augment = ("elasticache:ListTagsForResource",)
+
+    filter_registry = filters
+    action_registry = actions
+    permissions = ('elasticache:DescribeServerlessCaches', 'elasticache:ListTagsForResource',)
+    augment = universal_augment
+
+    source_mapping = {
+        'describe': DescribeSource,
+        'config': ConfigSource
+    }
+
+
 @filters.register('security-group')
 class SecurityGroupFilter(net_filters.SecurityGroupFilter):
 
@@ -362,6 +405,93 @@ class DeleteElastiCacheCluster(BaseAction):
         rpgs = self.manager.get_resource_manager('elasticache-group').resources(augment=False)
         global_rpgs = get_global_datastore_association(rpgs)
         return global_rpgs
+
+
+@ElastiCacheServerless.action_registry.register('delete')
+class DeleteServerlessCache(BaseAction):
+    """Action to delete an ElastiCache serverless cache
+
+    To prevent unwanted deletion of serverless caches, it is recommended
+    to include a filter
+
+    :example:
+
+    .. code-block:: yaml
+
+            policies:
+              - name: elasticache-delete-stale-serverless
+                resource: cache-serverless
+                filters:
+                  - type: value
+                    value_type: age
+                    key: CreateTime
+                    op: ge
+                    value: 90
+                actions:
+                  - type: delete
+    """
+
+    schema = type_schema('delete')
+    permissions = ('elasticache:DeleteServerlessCache',)
+
+    def process(self, resources):
+        client = local_session(
+            self.manager.session_factory).client('elasticache')
+
+        for cache in resources:
+            client.delete_serverless_cache(
+                ServerlessCacheName=cache['ServerlessCacheName'])
+            self.log.info(
+                'Deleted ElastiCache serverless cache: %s',
+                cache['ServerlessCacheName'])
+
+
+@ElastiCacheServerless.action_registry.register('modify')
+class ModifyServerlessCache(BaseAction):
+    """Action to modify an ElastiCache serverless cache
+
+    :example:
+
+    .. code-block:: yaml
+
+            policies:
+              - name: elasticache-modify-serverless
+                resource: cache-serverless
+                filters:
+                  - type: value
+                    key: Engine
+                    value: redis
+                actions:
+                  - type: modify
+                    attributes:
+                      SecurityGroupIds:
+                        - sg-12345678
+    """
+
+    schema = type_schema(
+        'modify',
+        attributes={'type': 'object'},
+        required=('attributes',))
+    permissions = ('elasticache:ModifyServerlessCache',)
+
+    def process(self, resources):
+        client = local_session(
+            self.manager.session_factory).client('elasticache')
+
+        for cache in resources:
+            params = {
+                'ServerlessCacheName': cache['ServerlessCacheName']
+            }
+            params.update(self.data.get('attributes', {}))
+            try:
+                client.modify_serverless_cache(**params)
+                self.log.info(
+                    'Modified ElastiCache serverless cache: %s',
+                    cache['ServerlessCacheName'])
+            except Exception as e:
+                self.log.error(
+                    'Error modifying serverless cache %s: %s',
+                    cache['ServerlessCacheName'], e)
 
 
 @actions.register('snapshot')
