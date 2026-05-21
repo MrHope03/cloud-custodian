@@ -43,6 +43,7 @@ ResourceMap = {
   "aws.bedrock-model-invocation-job": "c7n.resources.bedrock.BedrockModelInvocationJob",
   "aws.budget": "c7n.resources.budgets.Budget",
   "aws.cache-cluster": "c7n.resources.elasticache.ElastiCacheCluster",
+  "aws.cache-serverless": "c7n.resources.elasticache.ElastiCacheServerless",
   "aws.cache-snapshot": "c7n.resources.elasticache.ElastiCacheSnapshot",
   "aws.cache-subnet-group": "c7n.resources.elasticache.ElastiCacheSubnetGroup",
   "aws.catalog-portfolio": "c7n.resources.servicecatalog.CatalogPortfolio",
